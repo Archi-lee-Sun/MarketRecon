@@ -19,6 +19,14 @@ class SearchStrategy(BaseModel) :
         description="List of target online stores or domains."
     )
 
+    min_price: Optional[float] = Field(
+        None , description="Minimum price filter for the search."
+    )
+
+    max_price: Optional[float] = Field(
+        None , description="Maximum price filter for the search."
+    )
+
 
 class ProductOffer(BaseModel):
     product_name: str = Field(description="Exact product name")
