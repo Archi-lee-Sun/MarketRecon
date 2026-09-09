@@ -1,7 +1,7 @@
 from typing import TypedDict, List, Optional
 from pydantic import BaseModel, Field
 
-class SearchStrategy(BaseModel) :
+class SearchStrategy(BaseModel):
     is_valid_query: bool = Field(
         description="True if the request relates to a product or purchase, False if it is unclear or irrelevant."
     )
@@ -10,23 +10,28 @@ class SearchStrategy(BaseModel) :
         description="If is_valid_query is False, the clarification text sent to the user."
     )
 
+    direct_urls: List[str] = Field(
+        default_factory=list,
+        description="Exact product URLs the user provided directly, if any. If non-empty, search is skipped and these are scraped directly."
+    )
+
     refined_keywords: List[str] = Field(
-        description="List of refined search phrases for DuckDuckGo."
+        description="List of refined search phrases for DuckDuckGo. Only used when direct_urls is empty."
     )
 
     target_domains: list[str] = Field(
-        default_factory=list ,
-        description="List of target online stores or domains."
+        default_factory=list,
+        description="List of target online stores or domains to prefer/filter search results by. Only used when direct_urls is empty."
     )
 
     min_price: Optional[float] = Field(
-        None , description="Minimum price filter for the search."
+        None, description="Minimum price filter for the search."
     )
 
     max_price: Optional[float] = Field(
-        None , description="Maximum price filter for the search."
+        None, description="Maximum price filter for the search."
     )
-
+    
 
 class ProductOffer(BaseModel):
     product_name: str = Field(description="Exact product name")
