@@ -42,6 +42,13 @@ class ProductOffer(BaseModel):
     in_stock: bool = Field(description="Whether the item is in stock")
 
 
+class OfferListContainer(BaseModel):
+    offers: List[ProductOffer] = Field(
+        default_factory=list, 
+        description="List of extracted product offers from the markdown content"
+    )
+
+
 class AgentState(TypedDict):
     user_query: str                          
     search_strategy: Optional[SearchStrategy] 
