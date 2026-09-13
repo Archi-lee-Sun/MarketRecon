@@ -3,12 +3,13 @@ import logging
 import os
 
 from dotenv import load_dotenv
+load_dotenv()
+
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 from graph import app as market_recon_graph
-
-load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
