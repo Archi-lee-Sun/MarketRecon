@@ -48,10 +48,9 @@ class OfferListContainer(BaseModel):
         )    
 
 class AgentState(TypedDict):
-    user_query: str                          
-    search_strategy: Optional[SearchStrategy] 
-    raw_docs: List[str]                     
-    extracted_offers: List[ProductOffer] 
-    validation_status: str                    
-    final_report: str                         
-    error_message: Optional[str]
+    user_query: str
+    search_strategy: Optional[SearchStrategy]
+    raw_docs: List[dict[str, str]]
+    extracted_offers: List[ProductOffer]
+    validation_status: str
+    final_report: str
