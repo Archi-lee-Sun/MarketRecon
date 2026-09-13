@@ -17,9 +17,7 @@ import re
 from state import OfferListContainer, ProductOffer, SearchStrategy, AgentState
 from prompts import (
     get_query_refiner_prompt,
-    get_link_selector_prompt,
     get_extractor_prompt,
-    get_validator_prompt,
     get_synthesizer_prompt
 )
 
