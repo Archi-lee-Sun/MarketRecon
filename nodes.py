@@ -82,10 +82,11 @@ def scrape_urls(urls: List[str]) -> List[dict[str, str]]:
         "X-No-Cache": "true"
     }
 
-    with httpx.Client(timeout=15.0, headers=headers) as client:
+    with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
         for url in urls:
             try:
-                response = client.get(f"https://r.jina.ai/{url}")
+                fetch_url = url if url.startswith("https://s.jina.ai/") else f"https://r.jina.ai/{url}"
+                response = client.get(fetch_url)
                 response.raise_for_status()
                 if response.text.strip():
                     raw_docs.append({
@@ -108,11 +109,12 @@ def build_search_url(domain: str, query: str) -> Optional[str]:
         return None
     return template.format(query=quote(query))
 
+_DISCOVERY_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def try_opensearch_template(domain: str) -> Optional[str]:
     """Returns a reusable template ('{query}' placeholder, not filled in), or None."""
     try:
-        homepage = httpx.get(f"https://{domain}", timeout=10.0).text
+        homepage = httpx.get(f"https://{domain}", timeout=10.0, follow_redirects=True, headers=_DISCOVERY_HEADERS).text
         soup = BeautifulSoup(homepage, "html.parser")
         link = soup.find("link", rel="search", type="application/opensearchdescription+xml")
         if not link or not link.get("href"):
@@ -122,7 +124,7 @@ def try_opensearch_template(domain: str) -> Optional[str]:
         if not descriptor_url.startswith("http"):
             descriptor_url = f"https://{domain}{descriptor_url}"
 
-        xml_text = httpx.get(descriptor_url, timeout=10.0).text
+        xml_text = httpx.get(descriptor_url, timeout=10.0, headers=_DISCOVERY_HEADERS).text
         root = ET.fromstring(xml_text)
         url_elem = root.find(".//{http://a9.com/-/spec/opensearch/1.1/}Url[@type='text/html']")
         if url_elem is None:
@@ -137,7 +139,7 @@ def try_opensearch_template(domain: str) -> Optional[str]:
 def try_form_scrape_template(domain: str) -> Optional[str]:
     """Returns a reusable template ('{query}' placeholder, not filled in), or None."""
     try:
-        homepage = httpx.get(f"https://{domain}", timeout=10.0).text
+        homepage = httpx.get(f"https://{domain}", timeout=10.0, follow_redirects=True).text
         soup = BeautifulSoup(homepage, "html.parser")
         form = soup.find("form", attrs={"role": "search"}) or soup.find("form", action=re.compile("search", re.I))
         if not form:
@@ -257,6 +259,15 @@ def validate_offers_node(extracted_offers: List[ProductOffer] , strategy: Search
     return validated_offers
    
 
+def _extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
 
 def synthesize_final_report_node(validated_offers: List[ProductOffer], user_query: str) -> str:
     if not validated_offers:
@@ -278,7 +289,7 @@ def synthesize_final_report_node(validated_offers: List[ProductOffer], user_quer
 
     try:
         response = llm.invoke(messages)
-        return response.content
+        return _extract_text(response.content)
     except (ResourceExhausted, ClientError) as e:
         logger.error(f"Gemini quota/rate-limit error in synthesize_final_report_node: {e}")
         return "სერვისი დროებით მიუწვდომელია, სცადეთ მოგვიანებით."

@@ -38,12 +38,16 @@ Populate ONLY when the user pasted one or more literal, complete product URLs in
 </direct_urls>
 
 <refined_keywords>
-Only relevant when direct_urls is empty. Distill the user's raw phrasing into 1-2 clean, canonical search terms suitable for pasting directly into a store's own search box. Do NOT restate their whole sentence, and do NOT add keywords beyond what is needed to identify the product — every extra keyword multiplies scraping cost downstream (keywords × domains) in a $0-budget system. Prefer the tightest phrase that still uniquely identifies the product category and any explicitly named brand/model.
+Only relevant when direct_urls is empty. Distill the user's raw phrasing into 1-2 clean, canonical search terms suitable for pasting directly into a store's own search box. Do NOT restate their whole sentence, and do NOT add keywords beyond what is needed to identify the product — every extra keyword multiplies scraping cost downstream (keywords × domains) in a $0-budget system. Prefer the tightest phrase that still uniquely identifies the product category and any explicitly named brand/model. Always write refined_keywords in English/Latin script, translating or transliterating brand and product names to their standard English form, even when the user's message is in Georgian. Store search indexes — and especially international marketplaces — expect Latin-script terms, not Georgian script.
 </refined_keywords>
 
 <target_domains>
-Only relevant when direct_urls is empty. Suggest 2-5 real, bare store domains (e.g. "ee.ge" — never a full URL, never "https://", never a trailing path) that plausibly sell the product category, reasoning from general knowledge of what each store carries. You are not limited to any fixed list — any real domain is valid, because the pipeline auto-discovers a search endpoint for domains it has not seen before. The following domains are already cached by the pipeline and should be preferred when they genuinely fit the query — but never force-fit one that does not actually sell this category:
-ebay.com, extra.ge, psp.ge, aversi.ge, ee.ge, gstore.ge, nordstromrack.com, levi.com, time.ge, mymarket.ge.
+Only relevant when direct_urls is empty. Suggest 2-5 real, bare store domains (e.g. "ee.ge" — never a full URL, never "https://", never a trailing path) that plausibly sell the product category, reasoning from general knowledge of what each store carries. You are not limited to any fixed list — any real domain is valid, because the pipeline auto-discovers a search endpoint for domains it has not seen before.
+
+The following domains are already cached by the pipeline: ebay.com, extra.ge, psp.ge, aversi.ge, ee.ge, gstore.ge, nordstromrack.com, levi.com, time.ge, mymarket.ge. Treat this list as a shortcut for stores already discovered — not as an exhaustive or preferred set. Actively consider other well-known real stores that fit the category better, even when they are not cached. For Georgian electronics queries specifically, zoommer.ge and alta.ge are major real retailers and should be considered alongside or instead of the generic marketplaces when relevant.
+
+Use currency symbols and query language as a signal for local-vs-international intent: a query written in Georgian, or priced in ₾/GEL, usually wants Georgian stores. A query priced in $/USD or €/EUR, phrased in English with no Georgian-specific context, or explicitly naming an international site ("on amazon", "on ebay"), should include international marketplaces (amazon.com, ebay.com) even though they are not in the cached list and require the discovery fallback rather than a hardcoded template. Do not default to Georgian domains purely out of habit when the query itself signals an international audience.
+
 Do not pad this list to reach 5 if fewer domains are genuinely relevant — 2 well-reasoned domains beat 5 forced ones.
 </target_domains>
 
@@ -58,6 +62,7 @@ Extract min_price and/or max_price ONLY when the user explicitly stated a numeri
 - Never populate direct_urls together with non-empty refined_keywords or target_domains.
 - Never populate refined_keywords or target_domains together with a non-empty clarification_message.
 - Never invent a price bound; never invent a URL; never invent a domain unrelated to the product category.
+- Whenever is_valid_query is true, direct_urls is empty, and clarification_message is empty, refined_keywords and target_domains MUST both be non-empty. This state — valid, no clarification needed, yet nothing to search with — is never acceptable output.
 </constraints>
 
 <examples>
@@ -130,6 +135,20 @@ Expected output:
   "max_price": 800
 }
 </example_5>
+
+<example_6 description="Georgian-language electronics query — keywords translated to English, non-cached but more relevant domain included">
+User message: "მინდა ვიყიდო ASUS-ის ლეპტოპი, კარგი სათამაშოდ"
+Expected output:
+{
+  "is_valid_query": true,
+  "clarification_message": "",
+  "direct_urls": [],
+  "refined_keywords": ["ASUS gaming laptop"],
+  "target_domains": ["zoommer.ge", "alta.ge", "ee.ge"],
+  "min_price": null,
+  "max_price": null
+}
+</example_6>
 </examples>
 """
 
