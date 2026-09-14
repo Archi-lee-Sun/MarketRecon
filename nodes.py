@@ -1,24 +1,24 @@
 import os
-from typing import Dict, Any, List, Optional
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage
-from duckduckgo_search import DDGS
-import httpx
-from google.genai.errors import ClientError
-from google.api_core.exceptions import ResourceExhausted
-from pydantic import ValidationError
-from langchain_core.exceptions import OutputParserException
 import logging
-from urllib.parse import quote
-from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
 import re
+import xml.etree.ElementTree as ET
+from typing import List, Optional
+from urllib.parse import quote
+
+import httpx
+from bs4 import BeautifulSoup
+from google.api_core.exceptions import ResourceExhausted
+from google.genai.errors import ClientError
+from langchain_core.exceptions import OutputParserException
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import ValidationError
 
 from state import OfferListContainer, ProductOffer, SearchStrategy, AgentState
 from prompts import (
     get_query_refiner_prompt,
     get_extractor_prompt,
-    get_synthesizer_prompt
+    get_synthesizer_prompt,
 )
 
 SITE_TEMPLATES: dict[str, str] = {
@@ -34,6 +34,8 @@ SITE_TEMPLATES: dict[str, str] = {
     "mymarket.ge": "https://www.mymarket.ge/products/?Keyword={query}",
 }
 
+JINA_API_KEY = os.environ.get("JINA_API_KEY")  # optional, but s.jina.ai now rejects anonymous requests
+_DISCOVERY_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.1-flash-lite",
@@ -41,6 +43,7 @@ llm = ChatGoogleGenerativeAI(
 )
 
 logger = logging.getLogger(__name__)
+
 
 def refine_user_query(user_query: str) -> SearchStrategy:
     prompt_text = get_query_refiner_prompt()
@@ -79,8 +82,10 @@ def scrape_urls(urls: List[str]) -> List[dict[str, str]]:
     raw_docs = []
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "X-No-Cache": "true"
+        "X-No-Cache": "true",
     }
+    if JINA_API_KEY:
+        headers["Authorization"] = f"Bearer {JINA_API_KEY}"
 
     with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
         for url in urls:
@@ -109,12 +114,10 @@ def build_search_url(domain: str, query: str) -> Optional[str]:
         return None
     return template.format(query=quote(query))
 
-_DISCOVERY_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-def try_opensearch_template(domain: str) -> Optional[str]:
+def try_opensearch_template(domain: str, homepage: str) -> Optional[str]:
     """Returns a reusable template ('{query}' placeholder, not filled in), or None."""
     try:
-        homepage = httpx.get(f"https://{domain}", timeout=10.0, follow_redirects=True, headers=_DISCOVERY_HEADERS).text
         soup = BeautifulSoup(homepage, "html.parser")
         link = soup.find("link", rel="search", type="application/opensearchdescription+xml")
         if not link or not link.get("href"):
@@ -124,7 +127,7 @@ def try_opensearch_template(domain: str) -> Optional[str]:
         if not descriptor_url.startswith("http"):
             descriptor_url = f"https://{domain}{descriptor_url}"
 
-        xml_text = httpx.get(descriptor_url, timeout=10.0, headers=_DISCOVERY_HEADERS).text
+        xml_text = httpx.get(descriptor_url, timeout=10.0, headers=_DISCOVERY_HEADERS, follow_redirects=True).text
         root = ET.fromstring(xml_text)
         url_elem = root.find(".//{http://a9.com/-/spec/opensearch/1.1/}Url[@type='text/html']")
         if url_elem is None:
@@ -136,10 +139,9 @@ def try_opensearch_template(domain: str) -> Optional[str]:
         return None
 
 
-def try_form_scrape_template(domain: str) -> Optional[str]:
+def try_form_scrape_template(domain: str, homepage: str) -> Optional[str]:
     """Returns a reusable template ('{query}' placeholder, not filled in), or None."""
     try:
-        homepage = httpx.get(f"https://{domain}", timeout=10.0, follow_redirects=True).text
         soup = BeautifulSoup(homepage, "html.parser")
         form = soup.find("form", attrs={"role": "search"}) or soup.find("form", action=re.compile("search", re.I))
         if not form:
@@ -165,8 +167,13 @@ def jina_search_fallback(domain: str, query: str) -> str:
 
 
 def discover_search_template(domain: str) -> Optional[str]:
-    """Finds a reusable template for the domain (query not filled in). No query needed here."""
-    return try_opensearch_template(domain) or try_form_scrape_template(domain)
+    """Fetches the domain's homepage once and tries both discovery tiers against it."""
+    try:
+        homepage = httpx.get(f"https://{domain}", timeout=10.0, follow_redirects=True, headers=_DISCOVERY_HEADERS).text
+    except Exception as e:
+        logger.warning(f"Homepage fetch failed for {domain}: {e}")
+        return None
+    return try_opensearch_template(domain, homepage) or try_form_scrape_template(domain, homepage)
 
 
 def search_and_scrape(strategy: SearchStrategy) -> List[dict[str, str]]:
@@ -195,9 +202,8 @@ def search_and_scrape(strategy: SearchStrategy) -> List[dict[str, str]]:
     return scrape_urls(urls_to_scrape)
 
 
-
-def extract_offers_node(raw_docs: List[dict[str , str]]) -> List[ProductOffer] :
-    if not raw_docs :
+def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
+    if not raw_docs:
         logger.warning("No raw documents provided for offer extraction.")
         return []
 
@@ -205,11 +211,11 @@ def extract_offers_node(raw_docs: List[dict[str , str]]) -> List[ProductOffer] :
     all_offers: List[ProductOffer] = []
     structured_llm = llm.with_structured_output(OfferListContainer)
 
-    for doc in raw_docs: 
-        source_url = doc.get("url" , "unknown url")
-        content = doc.get("content" , "")
+    for doc in raw_docs:
+        source_url = doc.get("url", "unknown url")
+        content = doc.get("content", "")
 
-        if not content.strip() :
+        if not content.strip():
             logger.warning(f"Skipping document with empty content for URL: {source_url}")
             continue
 
@@ -220,7 +226,7 @@ def extract_offers_node(raw_docs: List[dict[str , str]]) -> List[ProductOffer] :
             ),
         ]
 
-        try :
+        try:
             result: OfferListContainer = structured_llm.invoke(messages)
             if result and result.offers:
                 all_offers.extend(result.offers)
@@ -237,8 +243,8 @@ def extract_offers_node(raw_docs: List[dict[str , str]]) -> List[ProductOffer] :
     return all_offers
 
 
-def validate_offers_node(extracted_offers: List[ProductOffer] , strategy: SearchStrategy) -> List[ProductOffer]:
-    if not extracted_offers :
+def validate_offers_node(extracted_offers: List[ProductOffer], strategy: SearchStrategy) -> List[ProductOffer]:
+    if not extracted_offers:
         logger.warning("No extracted offers provided for validation.")
         return []
 
@@ -248,16 +254,16 @@ def validate_offers_node(extracted_offers: List[ProductOffer] , strategy: Search
         if not offer.in_stock:
             continue
 
-        if strategy.min_price is not None and offer.price < strategy.min_price :
+        if strategy.min_price is not None and offer.price < strategy.min_price:
             continue
 
-        if strategy.max_price is not None and offer.price > strategy.max_price :
-            continue 
+        if strategy.max_price is not None and offer.price > strategy.max_price:
+            continue
 
         validated_offers.append(offer)
 
     return validated_offers
-   
+
 
 def _extract_text(content) -> str:
     if isinstance(content, str):
@@ -277,10 +283,10 @@ def synthesize_final_report_node(validated_offers: List[ProductOffer], user_quer
     sorted_offers = sorted(validated_offers, key=lambda o: o.price)
 
     offers_text = "\n".join(
-         f"- {o.product_name} | {o.price} {o.currency} | {o.store_name} | {o.product_url}"
-         for o in sorted_offers
+        f"- {o.product_name} | {o.price} {o.currency} | {o.store_name} | {o.product_url}"
+        for o in sorted_offers
     )
-    
+
     prompt_text = get_synthesizer_prompt()
     messages = [
         SystemMessage(content=prompt_text),
