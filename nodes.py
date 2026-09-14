@@ -87,17 +87,15 @@ def scrape_urls(urls: List[str]) -> List[dict[str, str]]:
     if JINA_API_KEY:
         headers["Authorization"] = f"Bearer {JINA_API_KEY}"
 
-    with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
+    with httpx.Client(timeout=40.0, headers=headers, follow_redirects=True) as client:
         for url in urls:
             try:
                 fetch_url = url if url.startswith("https://s.jina.ai/") else f"https://r.jina.ai/{url}"
                 response = client.get(fetch_url)
                 response.raise_for_status()
                 if response.text.strip():
-                    raw_docs.append({
-                        "url": url,
-                        "content": response.text
-                    })
+                    raw_docs.append({"url": url, "content": response.text})
+                    logger.info(f"Scraped '{url}' — {len(response.text)} chars")
             except httpx.HTTPStatusError as e:
                 logger.error(f"'{url}' returned {e.response.status_code}")
                 continue
