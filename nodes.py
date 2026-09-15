@@ -19,6 +19,7 @@ from prompts import (
     get_query_refiner_prompt,
     get_extractor_prompt,
     get_synthesizer_prompt,
+    get_validator_prompt,
 )
 
 SITE_TEMPLATES: dict[str, str] = {
@@ -241,26 +242,44 @@ def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
     return all_offers
 
 
-def validate_offers_node(extracted_offers: List[ProductOffer], strategy: SearchStrategy) -> List[ProductOffer]:
+def validate_offers_node(extracted_offers: List[ProductOffer], strategy: SearchStrategy, user_query: str) -> List[ProductOffer]:
     if not extracted_offers:
         logger.warning("No extracted offers provided for validation.")
         return []
 
-    validated_offers: List[ProductOffer] = []
+    in_stock_offers = [o for o in extracted_offers if o.in_stock]
+    if not in_stock_offers:
+        logger.warning("No in-stock offers to validate.")
+        return []
 
-    for offer in extracted_offers:
-        if not offer.in_stock:
-            continue
+    prompt_text = get_validator_prompt()
+    structured_llm = llm.with_structured_output(OfferListContainer)
 
-        if strategy.min_price is not None and offer.price < strategy.min_price:
-            continue
+    offers_text = "\n".join(
+        f"- {o.product_name} | {o.price} {o.currency} | {o.store_name} | {o.product_url}"
+        for o in in_stock_offers
+    )
+    budget_line = ""
+    if strategy.min_price is not None or strategy.max_price is not None:
+        budget_line = f"\nStated budget bound(s): min={strategy.min_price}, max={strategy.max_price} (currency not given by these numbers alone — infer it from the user query text above)."
 
-        if strategy.max_price is not None and offer.price > strategy.max_price:
-            continue
+    messages = [
+        SystemMessage(content=prompt_text),
+        HumanMessage(content=f"User query: {user_query}{budget_line}\n\nCandidate offers:\n{offers_text}")
+    ]
 
-        validated_offers.append(offer)
-
-    return validated_offers
+    try:
+        result: OfferListContainer = structured_llm.invoke(messages)
+        return result.offers if result else []
+    except (ResourceExhausted, ClientError) as e:
+        logger.error(f"Gemini quota/rate-limit error in validate_offers_node: {e}")
+        return []
+    except (ValidationError, OutputParserException) as e:
+        logger.error(f"Structured output validation failed in validate_offers_node: {e}")
+        return []
+    except Exception as e:
+        logger.critical(f"Unexpected error in validate_offers_node: {e}", exc_info=True)
+        return []
 
 
 def _extract_text(content) -> str:
