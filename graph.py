@@ -40,16 +40,12 @@ def extract_offers_node_wrapper(state: AgentState) -> Dict[str, Any]:
 def validator_node_wrapper(state: AgentState) -> Dict[str, Any]:
     offers = state.get("extracted_offers", [])
     strategy = state.get("search_strategy")
-
+    user_query = state.get("user_query", "")
     if not strategy:
         return {"extracted_offers": [], "validation_status": "missing_strategy"}
-
-    validated_offers = validate_offers_node(offers, strategy)
+    validated_offers = validate_offers_node(offers, strategy, user_query)
     status = "success" if validated_offers else "no_offers_matched"
-    return {
-        "extracted_offers": validated_offers,
-        "validation_status": status,
-    }
+    return {"extracted_offers": validated_offers, "validation_status": status}
 
 
 def synthesize_report_node_wrapper(state: AgentState) -> Dict[str, Any]:
