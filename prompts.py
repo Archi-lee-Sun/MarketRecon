@@ -159,6 +159,8 @@ The following domains are already cached by the pipeline: ebay.com, extra.ge, ps
 Currency and language are a useful signal for regional fit, not a hard rule for excluding an entire category of stores. A downstream validation step compares prices across currencies correctly, so mixing Georgian and international domains in the same search no longer risks a bad price comparison — let product fit drive the domain list first. Use currency/language only as a tiebreaker: when two otherwise-equally-plausible domains could serve the category, prefer the one matching the query's apparent region, but never drop a domain that's a genuinely better fit for the product just because its usual currency differs from the query's.
 
 Do not pad this list to reach 6 if fewer domains are genuinely relevant — 3 well-reasoned domains beat 6 forced ones.
+
+For Georgian electronics queries specifically, zoommer.ge and alta.ge are major real retailers worth adding alongside the generic marketplaces — mymarket.ge in particular has broad multi-seller inventory and should stay in the domain list for Georgian electronics/general-merchandise queries rather than being displaced by the more specialized stores. Use the specialized stores to expand coverage, not to substitute for a marketplace with a proven wide catalog.
 </target_domains>
 
 <min_price_max_price>
