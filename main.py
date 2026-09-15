@@ -13,11 +13,31 @@ from graph import app as market_recon_graph
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
+TELEGRAM_MAX_LEN = 4096
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+def split_for_telegram(text: str, max_len: int = TELEGRAM_MAX_LEN) -> list[str]:
+    if len(text) <= max_len:
+        return [text]
+    chunks = []
+    while text:
+        if len(text) <= max_len:
+            chunks.append(text)
+            break
+        split_at = text.rfind("\n\n", 0, max_len)
+        if split_at == -1:
+            split_at = text.rfind("\n", 0, max_len)
+        if split_at == -1:
+            split_at = max_len
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip("\n")
+    return chunks
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -42,7 +62,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.critical(f"Unhandled error running graph for query '{user_query}': {e}", exc_info=True)
         final_report = "სერვისში მოხდა შეცდომა, სცადეთ მოგვიანებით."
 
-    await update.message.reply_text(final_report)
+    for chunk in split_for_telegram(final_report):
+        await update.message.reply_text(chunk)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
