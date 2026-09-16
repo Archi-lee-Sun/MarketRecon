@@ -33,6 +33,7 @@ SITE_TEMPLATES: dict[str, str] = {
     "levi.com": "https://www.levi.com/US/en_US/search/{query}",
     "time.ge": "https://time.ge/en/search/?q={query}",
     "mymarket.ge": "https://www.mymarket.ge/products/?Keyword={query}",
+    "amazon.com": "https://www.amazon.com/s?k={query}",
 }
 
 JINA_API_KEY = os.environ.get("JINA_API_KEY")  # optional, but s.jina.ai now rejects anonymous requests
@@ -44,7 +45,6 @@ llm = ChatGoogleGenerativeAI(
 )
 
 logger = logging.getLogger(__name__)
-
 
 
 def refine_user_query(user_query: str) -> SearchStrategy:
@@ -66,15 +66,20 @@ def refine_user_query(user_query: str) -> SearchStrategy:
             )
         return strategy
     except (ResourceExhausted, ClientError) as e:
+        logger.error(f"Gemini quota/rate-limit error in refine_user_query: {e}")
+        return SearchStrategy(
+            is_valid_query=False,
+            clarification_message="სერვისი დროებით მიუწვდომელია, სცადეთ მოგვიანებით.",
+            direct_urls=[], refined_keywords=[], target_domains=[],
+            min_price=None, max_price=None,
+        )
+    except (ValidationError, OutputParserException) as e:
         logger.error(f"Structured output validation failed in refine_user_query: {e}")
         return SearchStrategy(
             is_valid_query=False,
             clarification_message="მოთხოვნის დამუშავება ვერ მოხერხდა, გთხოვთ ჩაწეროთ პროდუქტთან დაკავშირებული უფრო კონკრეტული მოთხოვნა.",
-            direct_urls=[],
-            refined_keywords=[],
-            target_domains=[],
-            min_price=None,
-            max_price=None,
+            direct_urls=[], refined_keywords=[], target_domains=[],
+            min_price=None, max_price=None,
         )
 
 
@@ -200,6 +205,9 @@ def search_and_scrape(strategy: SearchStrategy) -> List[dict[str, str]]:
     return scrape_urls(urls_to_scrape)
 
 
+MAX_CONTENT_CHARS = 60000
+
+
 def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
     if not raw_docs:
         logger.warning("No raw documents provided for offer extraction.")
@@ -208,7 +216,6 @@ def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
     prompt_text = get_extractor_prompt()
     all_offers: List[ProductOffer] = []
     structured_llm = llm.with_structured_output(OfferListContainer)
-    MAX_CONTENT_CHARS = 60000
 
     for doc in raw_docs:
         source_url = doc.get("url", "unknown url")
@@ -231,7 +238,9 @@ def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
 
         try:
             result: OfferListContainer = structured_llm.invoke(messages)
-            if result and result.offers:
+            offer_count = len(result.offers) if result and result.offers else 0
+            logger.info(f"Extracted {offer_count} offer(s) from '{source_url}'")
+            if offer_count:
                 all_offers.extend(result.offers)
         except (ResourceExhausted, ClientError) as e:
             logger.error(f"Gemini quota/rate-limit error in extract_offers_node for {source_url}: {e}")
@@ -274,7 +283,9 @@ def validate_offers_node(extracted_offers: List[ProductOffer], strategy: SearchS
 
     try:
         result: OfferListContainer = structured_llm.invoke(messages)
-        return result.offers if result else []
+        kept = result.offers if result else []
+        logger.info(f"Validator kept {len(kept)} of {len(in_stock_offers)} candidate offers")
+        return kept
     except (ResourceExhausted, ClientError) as e:
         logger.error(f"Gemini quota/rate-limit error in validate_offers_node: {e}")
         return []
