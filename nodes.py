@@ -46,27 +46,26 @@ llm = ChatGoogleGenerativeAI(
 logger = logging.getLogger(__name__)
 
 
+
 def refine_user_query(user_query: str) -> SearchStrategy:
     prompt_text = get_query_refiner_prompt()
     try:
         structured_llm = llm.with_structured_output(SearchStrategy)
-        messages = [
-            SystemMessage(content=prompt_text),
-            HumanMessage(content=user_query),
-        ]
-        return structured_llm.invoke(messages)
+        messages = [SystemMessage(content=prompt_text), HumanMessage(content=user_query)]
+        strategy: SearchStrategy = structured_llm.invoke(messages)
+
+        if (strategy.is_valid_query and not strategy.clarification_message
+                and not strategy.direct_urls and not strategy.refined_keywords
+                and not strategy.target_domains):
+            logger.warning(f"Refiner returned an inconsistent state for query '{user_query}' — valid with nothing to search on. Forcing a clarification instead of silently returning zero results.")
+            return SearchStrategy(
+                is_valid_query=True,
+                clarification_message="ვერ დავადგინე კონკრეტულად რას ეძებთ, გთხოვთ დააკონკრეტოთ პროდუქტი ან ბრენდი.",
+                direct_urls=[], refined_keywords=[], target_domains=[],
+                min_price=strategy.min_price, max_price=strategy.max_price,
+            )
+        return strategy
     except (ResourceExhausted, ClientError) as e:
-        logger.error(f"Gemini quota/rate-limit error in refine_user_query: {e}")
-        return SearchStrategy(
-            is_valid_query=False,
-            clarification_message="სერვისი დროებით მიუწვდომელია, სცადეთ მოგვიანებით.",
-            direct_urls=[],
-            refined_keywords=[],
-            target_domains=[],
-            min_price=None,
-            max_price=None,
-        )
-    except (ValidationError, OutputParserException) as e:
         logger.error(f"Structured output validation failed in refine_user_query: {e}")
         return SearchStrategy(
             is_valid_query=False,
@@ -209,6 +208,7 @@ def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
     prompt_text = get_extractor_prompt()
     all_offers: List[ProductOffer] = []
     structured_llm = llm.with_structured_output(OfferListContainer)
+    MAX_CONTENT_CHARS = 60000
 
     for doc in raw_docs:
         source_url = doc.get("url", "unknown url")
@@ -217,6 +217,10 @@ def extract_offers_node(raw_docs: List[dict[str, str]]) -> List[ProductOffer]:
         if not content.strip():
             logger.warning(f"Skipping document with empty content for URL: {source_url}")
             continue
+
+        if len(content) > MAX_CONTENT_CHARS:
+            logger.warning(f"Truncating '{source_url}' content from {len(content)} to {MAX_CONTENT_CHARS} chars before extraction")
+            content = content[:MAX_CONTENT_CHARS]
 
         messages = [
             SystemMessage(content=prompt_text),
