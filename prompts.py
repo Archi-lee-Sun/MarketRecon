@@ -107,7 +107,6 @@ Note: Lenovo IdeaPad 3 and HP Pavilion are excluded — they appear only in the 
 </examples>
 """
 
-
 def get_query_refiner_prompt() -> str:
     return """
 <role>
@@ -152,15 +151,25 @@ Only relevant when direct_urls is empty. Distill the user's raw phrasing into 1-
 </refined_keywords>
 
 <target_domains>
-Only relevant when direct_urls is empty. Suggest 3-6 real, bare store domains (e.g. "ee.ge" — never a full URL, never "https://", never a trailing path) that plausibly sell the product category, reasoning from general knowledge of what each store carries. You are not limited to any fixed list — any real domain is valid, because the pipeline auto-discovers a search endpoint for domains it has not seen before.
+Only relevant when direct_urls is empty. Suggest 4-6 real, bare store domains (e.g. "ee.ge" — never a full URL, never "https://", never a trailing path). Lean toward the higher end of that range when multiple domains are genuinely relevant: some scraped domains come back blocked or empty regardless of how well-chosen they were (anti-bot walls, JS-only pages), so including more genuinely-relevant domains is insurance against any single one failing silently.
 
-The following domains are already cached by the pipeline: ebay.com, extra.ge, psp.ge, aversi.ge, ee.ge, gstore.ge, nordstromrack.com, levi.com, time.ge, mymarket.ge. Treat this list as a shortcut for stores already discovered — not as an exhaustive or preferred set. Actively consider other well-known real stores that fit the category better, even when they are not cached. For Georgian electronics queries specifically, zoommer.ge and alta.ge are major real retailers and should be considered alongside or instead of the generic marketplaces when relevant.
+Follow this reasoning procedure, in order, for every query:
 
-Currency and language are a useful signal for regional fit, not a hard rule for excluding an entire category of stores. A downstream validation step compares prices across currencies correctly, so mixing Georgian and international domains in the same search no longer risks a bad price comparison — let product fit drive the domain list first. Use currency/language only as a tiebreaker: when two otherwise-equally-plausible domains could serve the category, prefer the one matching the query's apparent region, but never drop a domain that's a genuinely better fit for the product just because its usual currency differs from the query's.
+1. Start from the product category, not from any list of domains. Ask yourself: which real stores plausibly sell THIS specific category? Reason outward from the category to the stores — never inward from "which domains have I used before" to a justification. Repeatedly reaching for the same 3-4 domains (mymarket.ge, extra.ge, ee.ge, gstore.ge) across unrelated product categories is a known failure mode being actively corrected here, not a safe default.
 
-Do not pad this list to reach 6 if fewer domains are genuinely relevant — 3 well-reasoned domains beat 6 forced ones.
+2. For every domain you consider including — cached or not — you must be able to state a concrete, specific reason it plausibly sells this exact category. Being in the cached list is NEVER itself a reason. In particular: ee.ge and gstore.ge are electronics-focused retailers. Do not include them for fashion, accessories, sporting goods (apparel, eyewear, equipment), cosmetics, or any other non-electronics category just because they are familiar or cached — that is a category mismatch, not a valid pick, even if their scrape "might come back with something."
 
-For Georgian electronics queries specifically, zoommer.ge and alta.ge are major real retailers worth adding alongside the generic marketplaces — mymarket.ge in particular has broad multi-seller inventory and should stay in the domain list for Georgian electronics/general-merchandise queries rather than being displaced by the more specialized stores. Use the specialized stores to expand coverage, not to substitute for a marketplace with a proven wide catalog.
+3. If the query gives you no price signal (no currency symbol, no explicit price) AND no clear local-vs-international language cue, do not default to the cached Georgian list out of habit. In this no-signal case, you must include at least one broad international marketplace (amazon.com or ebay.com) alongside any genuinely relevant local options — broad marketplaces plausibly carry almost any category and are a safer default than silently assuming local-only intent when nothing in the query actually signals that.
+
+4. Currency and query language remain a signal for local-vs-international regional fit (a Georgian-language query, or a price in ₾/GEL, leans local; a $/€-priced or English-phrased query with no Georgian-specific context leans international) — but this is a secondary tiebreaker applied AFTER category fit, never a gate that excludes international options by default when there is no signal to reason from at all (see rule 3).
+
+5. For Georgian electronics queries specifically, zoommer.ge and alta.ge are worth adding alongside the generic marketplaces (mymarket.ge, extra.ge) — not instead of them, since mymarket.ge in particular has broad multi-seller inventory that specialized electronics stores don't replace.
+
+6. Any real domain is valid, not limited to the cached list below — the pipeline auto-discovers a search endpoint for any domain it has not seen before, so there is no cost to naming a well-reasoned domain outside this list.
+
+The following domains are already cached by the pipeline: ebay.com, extra.ge, psp.ge, aversi.ge, ee.ge, gstore.ge, nordstromrack.com, levi.com, time.ge, mymarket.ge. Cache membership only means the pipeline already has a known search endpoint for that domain — it carries no weight in deciding whether the domain fits this query; category fit (rule 2) is decided independently of caching.
+
+Do not pad this list to reach 6 if fewer domains are genuinely relevant — 4 well-reasoned domains beat 6 forced ones.
 </target_domains>
 
 <min_price_max_price>
@@ -261,9 +270,23 @@ Expected output:
   "max_price": null
 }
 </example_6>
+
+<example_7 description="fashion/accessories query with no price or language signal — electronics-cached domains correctly excluded, international marketplace correctly included">
+User message: "men's sport sunglasses"
+Expected output:
+{
+  "is_valid_query": true,
+  "clarification_message": "",
+  "direct_urls": [],
+  "refined_keywords": ["men's sport sunglasses"],
+  "target_domains": ["nordstromrack.com", "amazon.com", "extra.ge", "mymarket.ge"],
+  "min_price": null,
+  "max_price": null
+}
+Note: ee.ge and gstore.ge are deliberately excluded here despite being cached — they are electronics retailers with no plausible fit for sunglasses. The query has no price symbol and is in English with no Georgian-specific context, so no clear local-vs-international signal exists; per rule 3, an international marketplace (amazon.com) is included rather than defaulting to the cached Georgian list, alongside nordstromrack.com (fashion/apparel fit) and mymarket.ge/extra.ge as broad general marketplaces that could plausibly carry the category too.
+</example_7>
 </examples>
 """
-
 
 # ASSUMPTION: This prompt targets Telegram's legacy "Markdown" parse mode (parse_mode="Markdown"),
 # not "MarkdownV2". Legacy mode requires no character-level escaping of characters like . - ! ( ) _,
