@@ -8,6 +8,8 @@ from nodes import (
     search_and_scrape,
     extract_offers_node,
     validate_offers_node,
+    fetch_offer_details_node,
+    precision_match_node,
     synthesize_final_report_node,
 )
 
@@ -48,6 +50,20 @@ def validator_node_wrapper(state: AgentState) -> Dict[str, Any]:
     return {"extracted_offers": validated_offers, "validation_status": status}
 
 
+def fetch_details_node_wrapper(state: AgentState) -> Dict[str, Any]:
+    offers = state.get("extracted_offers", [])
+    enriched_offers = fetch_offer_details_node(offers)
+    return {"extracted_offers": enriched_offers}
+
+
+def precision_match_node_wrapper(state: AgentState) -> Dict[str, Any]:
+    offers = state.get("extracted_offers", [])
+    user_query = state.get("user_query", "")
+    final_offers = precision_match_node(offers, user_query)
+    status = "success" if final_offers else "no_offers_matched"
+    return {"extracted_offers": final_offers, "validation_status": status}
+
+
 def synthesize_report_node_wrapper(state: AgentState) -> Dict[str, Any]:
     strategy = state.get("search_strategy")
     if strategy and not strategy.is_valid_query:
@@ -74,6 +90,8 @@ builder.add_node("refine_query", refine_query_node_wrapper)
 builder.add_node("search_and_scrape", search_and_scrape_node_wrapper)
 builder.add_node("extract_offers", extract_offers_node_wrapper)
 builder.add_node("validator", validator_node_wrapper)
+builder.add_node("fetch_details", fetch_details_node_wrapper)
+builder.add_node("precision_match", precision_match_node_wrapper)
 builder.add_node("synthesize_report", synthesize_report_node_wrapper)
 
 builder.add_edge(START, "refine_query")
@@ -89,7 +107,9 @@ builder.add_conditional_edges(
 
 builder.add_edge("search_and_scrape" , "extract_offers")
 builder.add_edge("extract_offers" , "validator")
-builder.add_edge("validator" , "synthesize_report")
+builder.add_edge("validator" , "fetch_details")
+builder.add_edge("fetch_details" , "precision_match")
+builder.add_edge("precision_match" , "synthesize_report")
 builder.add_edge("synthesize_report" , END)
 
 app = builder.compile()
