@@ -40,6 +40,10 @@ class ProductOffer(BaseModel):
     store_name: str = Field(description="Store or website name")
     product_url: str = Field(description="Direct link to the product")
     in_stock: bool = Field(description="Whether the item is in stock")
+    description: Optional[str] = Field(
+        default=None,
+        description="Full raw content from the product's own page, fetched after shortlisting. None until the detail-fetch stage runs — do not assume this is populated at earlier pipeline stages."
+    )
 
 
 class OfferListContainer(BaseModel):
