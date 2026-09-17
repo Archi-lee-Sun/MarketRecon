@@ -20,6 +20,7 @@ from prompts import (
     get_extractor_prompt,
     get_synthesizer_prompt,
     get_validator_prompt,
+    get_precision_matcher_prompt,
 )
 
 SITE_TEMPLATES: dict[str, str] = {
@@ -294,6 +295,82 @@ def validate_offers_node(extracted_offers: List[ProductOffer], strategy: SearchS
         return []
     except Exception as e:
         logger.critical(f"Unexpected error in validate_offers_node: {e}", exc_info=True)
+        return []
+
+
+
+PRODUCT_DETAIL_MAX_CHARS = 20000
+
+
+def fetch_offer_details_node(offers: List[ProductOffer]) -> List[ProductOffer]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "X-No-Cache": "true",
+    }
+    if JINA_API_KEY:
+        headers["Authorization"] = f"Bearer {JINA_API_KEY}"
+
+    with httpx.Client(timeout=40.0, headers=headers, follow_redirects=True) as client:
+        for offer in offers:
+            fetch_url = f"https://r.jina.ai/{offer.product_url}"
+            try:
+                response = client.get(fetch_url)
+                response.raise_for_status()
+                content = response.text
+                if len(content) > PRODUCT_DETAIL_MAX_CHARS:
+                    logger.warning(
+                        f"Truncating product detail page for '{offer.product_url}' "
+                        f"from {len(content)} to {PRODUCT_DETAIL_MAX_CHARS} chars"
+                    )
+                    content = content[:PRODUCT_DETAIL_MAX_CHARS]
+                offer.description = content
+                logger.info(f"Fetched product detail for '{offer.product_url}' — {len(content)} chars")
+            except httpx.HTTPStatusError as e:
+                logger.error(f"'{offer.product_url}' returned {e.response.status_code} during detail fetch")
+                continue
+            except httpx.RequestError as e:
+                logger.error(f"Network error fetching detail for '{offer.product_url}': {e}")
+                continue
+            except Exception as e:
+                logger.critical(f"Unexpected error fetching detail for '{offer.product_url}': {e}", exc_info=True)
+                continue
+
+    return offers
+
+
+def precision_match_node(offers: List[ProductOffer], user_query: str) -> List[ProductOffer]:
+    if not offers:
+        logger.warning("No offers provided for precision matching.")
+        return []
+
+    prompt_text = get_precision_matcher_prompt()
+    structured_llm = llm.with_structured_output(OfferListContainer)
+
+    DESCRIPTION_PREVIEW_CHARS = 300
+    offers_text = "\n".join(
+        f"- {o.product_name} | {o.price} {o.currency} | {o.store_name} | {o.product_url}"
+        f" | description: {(o.description or '')[:DESCRIPTION_PREVIEW_CHARS]}"
+        for o in offers
+    )
+
+    messages = [
+        SystemMessage(content=prompt_text),
+        HumanMessage(content=f"User query: {user_query}\n\nCandidate offers:\n{offers_text}")
+    ]
+
+    try:
+        result: OfferListContainer = structured_llm.invoke(messages)
+        kept = result.offers if result else []
+        logger.info(f"Precision match kept {len(kept)} of {len(offers)} candidate offers")
+        return kept
+    except (ResourceExhausted, ClientError) as e:
+        logger.error(f"Gemini quota/rate-limit error in precision_match_node: {e}")
+        return []
+    except (ValidationError, OutputParserException) as e:
+        logger.error(f"Structured output validation failed in precision_match_node: {e}")
+        return []
+    except Exception as e:
+        logger.critical(f"Unexpected error in precision_match_node: {e}", exc_info=True)
         return []
 
 
